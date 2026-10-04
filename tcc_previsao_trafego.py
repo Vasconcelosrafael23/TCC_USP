@@ -23,8 +23,8 @@
       sazonal OCSB e Canova-Hansen; SARIMA com D = 0; viés de 1 p.p. na taxa
       de crescimento do tráfego; projeção por PIB x elasticidade com o Focus de
       22/11/2024, confrontada com o realizado de 2025.
-   9. Figuras do TCC (Figura 1: STL; Figura 2: janela de teste; Figura 3:
-      previsão com intervalo de 95% do Holt-Winters).
+   9. Figuras do TCC (Figura 1: STL; Figura 2: janela de teste; Figura 3: erro
+      relativo ao naïve por passo; Figura 4: previsão com intervalo de 95%).
   10. Conferência dos números citados no texto (numeros_do_texto.txt).
 
  DADOS
@@ -1365,7 +1365,12 @@ def analises_complementares(serie):
 # ==============================================================================
 def figuras_tcc(serie):
     import matplotlib.dates as md
-    plt.rcParams.update({"font.size": 16, "axes.spines.top": False, "axes.spines.right": False})
+    # Formato exigido pelo manual: sem grade, sem borda e sem título; eixos em linha preta de 1,5 pt;
+    # fonte Arial (ou Liberation Sans, métrica equivalente) em tamanho que resulte em até 11 pt no documento.
+    plt.rcParams.update({"font.family": ["Arial", "Liberation Sans", "DejaVu Sans"], "font.size": 18,
+                         "axes.spines.top": False, "axes.spines.right": False,
+                         "axes.edgecolor": "black", "axes.linewidth": 1.5,
+                         "xtick.major.width": 1.5, "ytick.major.width": 1.5, "axes.grid": False})
     cor = {HW: "#ff7f0e", SARIMA: "#2ca02c", PROPHET: "#d62728", XGB: "#9467bd", NAIVE: "#1f77b4"}
     fbr = lambda v, d: f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
     fmi = FuncFormatter(lambda v, _: fbr(v / 1e6, 2))
@@ -1379,7 +1384,7 @@ def figuras_tcc(serie):
                                       (st.seasonal, "Sazonal\n(veículos)", "#2ca02c", fmil),
                                       (st.resid, "Resíduo\n(veículos)", "#d62728", fmil)]):
         a.plot(y.index, y.values, color=c, lw=1.3); a.set_ylabel(lab)
-        a.yaxis.set_major_formatter(f); a.grid(alpha=.3)
+        a.yaxis.set_major_formatter(f)
     ax[-1].set_xlabel("Ano"); fig.tight_layout(); fig.savefig("figura1_stl.png", dpi=300); plt.close(fig)
 
     # Figura 2 — previsões um passo à frente na janela de teste
@@ -1390,11 +1395,24 @@ def figuras_tcc(serie):
         a.plot(bt.index, bt[m], color=c, lw=1.4, marker=".", ms=5, label=m)
     a.yaxis.set_major_formatter(fmi); a.set_ylabel("Volume mensal (milhões de veículos)")
     a.xaxis.set_major_formatter(md.DateFormatter("%m/%Y"))
-    a.xaxis.set_major_locator(md.MonthLocator(bymonth=[1, 4, 7, 10])); a.grid(alpha=.3)
+    a.xaxis.set_major_locator(md.MonthLocator(bymonth=[1, 4, 7, 10]))
     a.legend(frameon=False, fontsize=13, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.1))
     fig.tight_layout(); fig.savefig("figura2_janela_teste.png", dpi=300); plt.close(fig)
 
-    # Figura 3 — previsão de 12 meses com intervalo de 95% do Holt-Winters
+    # Figura 3 — MASE de cada modelo dividido pelo do naïve sazonal, por passo (horizonte de 12 meses)
+    mp = pd.read_excel("serie_prevista.xlsx", sheet_name="MASE_por_passo").set_index("Passo")
+    fig, a = plt.subplots(figsize=(12, 6.2))
+    for m in [HW, SARIMA, PROPHET, XGB]:
+        a.plot(mp.index, mp[m] / mp[NAIVE], color=cor[m], lw=2, marker="o", ms=6, label=m)
+    a.axhline(1, color="black", ls="--", lw=1.2, label="Naïve sazonal (= 1)")
+    a.set_xticks(range(1, 13)); a.set_xlabel("Passos à frente (meses)")
+    a.set_ylabel("MASE do modelo ÷ MASE do naïve")
+    a.yaxis.set_major_formatter(FuncFormatter(lambda v, _: fbr(v, 1)))
+    a.set_ylim(0, 1.1)
+    a.legend(frameon=False, fontsize=13, ncol=3, loc="upper center", bbox_to_anchor=(0.5, -0.15))
+    fig.tight_layout(); fig.savefig("figura3_erro_por_passo.png", dpi=300); plt.close(fig)
+
+    # Figura 4 — previsão de 12 meses com intervalo de 95% do Holt-Winters
     pf = pd.read_excel("serie_prevista.xlsx", sheet_name="Previsao_Futura"); pf.index = pd.to_datetime(pf["Data"])
     hw = ExponentialSmoothing(serie, trend="add", seasonal="add", seasonal_periods=12,
                               initialization_method="estimated").fit()
@@ -1411,8 +1429,8 @@ def figuras_tcc(serie):
         a.plot(pf.index, pf[m], color=c, lw=1.6, marker=".", ms=5, label=m)
     a.axvline(serie.index[-1], color="black", ls=":", lw=1)
     a.yaxis.set_major_formatter(fmi); a.set_ylabel("Volume mensal (milhões de veículos)"); a.set_xlabel("Ano")
-    a.grid(alpha=.3); a.legend(frameon=False, fontsize=11, ncol=2, loc="lower right")
-    fig.tight_layout(); fig.savefig("figura3_previsao.png", dpi=300); plt.close(fig)
+    a.legend(frameon=False, fontsize=11, ncol=2, loc="lower right")
+    fig.tight_layout(); fig.savefig("figura4_previsao.png", dpi=300); plt.close(fig)
     amp = 100 * (hi - lo) / fc
     print(f"Figuras do TCC gravadas. Amplitude do intervalo: {amp.iloc[0]:.1f}% (mês 1) a {amp.iloc[-1]:.1f}% (mês 12).")
 

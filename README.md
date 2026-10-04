@@ -63,7 +63,7 @@ A execução completa leva cerca de 10 minutos.
 | `numeros_do_texto.txt` | Números citados no texto do TCC que não constam das tabelas |
 | `serie_prevista.xlsx` | Série histórica, previsões do teste, previsão futura e métricas |
 | `metricas_h1.csv`, `metricas_h12.csv` | Métricas por modelo nos horizontes de um e de doze meses |
-| `figura1_stl.png`, `figura2_janela_teste.png`, `figura3_previsao.png` | Figuras do TCC |
+| `figura1_stl.png`, `figura2_janela_teste.png`, `figura3_erro_por_passo.png`, `figura4_previsao.png` | Figuras do TCC |
 
 ## Ambiente
 
