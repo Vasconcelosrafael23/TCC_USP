@@ -16,15 +16,13 @@ O trabalho compara quatro modelos de previsão do volume mensal de tráfego de u
 
 Os quatro são confrontados com um modelo de referência, o naïve sazonal, que repete o volume do mesmo mês do ano anterior.
 
-A comparação usa validação por origem móvel nos horizontes de um e de doze meses, as métricas MAE, RMSE, MAPE e MASE e o teste de Diebold-Mariano com correção de Holm. O trabalho também examina o procedimento de projeção de demanda por PIB × elasticidade adotado na estruturação de concessões.
+A comparação usa validação por origem móvel nos horizontes de um e de doze meses, as métricas MAE, RMSE, MAPE e MASE e o teste de Diebold-Mariano com correção de Holm. O trabalho também examina o procedimento de projeção de demanda adotado na estruturação de concessões, por análise documental e por um teste do método dos estudos na mesma janela de avaliação dos modelos.
 
 ## Dados
 
 Os dados vêm do conjunto [Volume de Tráfego nas Praças de Pedágio](https://dados.antt.gov.br/dataset/volume-trafego-praca-pedagio), do Portal de Dados Abertos da Agência Nacional de Transportes Terrestres (ANTT).
 
-Os dados não estão neste repositório. Na primeira execução, o script cria a pasta `dados/` e baixa automaticamente do portal da ANTT os arquivos anuais de 2010 a 2024, que bastam para todos os resultados principais.
-
-O exercício de PIB × elasticidade confronta as projeções com o tráfego realizado em 2025 e, por isso, precisa também do arquivo consolidado mensal de 2025. Esse arquivo deve ser baixado manualmente no mesmo portal e salvo em `dados/` com o nome `volume-trafego-praca-pedagio-2025_mensal_consolidado.csv`, depois da primeira execução: o download automático só ocorre quando a pasta `dados/` está vazia, e o arquivo de 2025 colocado antes impediria a baixa dos demais. Sem ele, o script roda normalmente e apenas pula esse exercício, avisando no relatório.
+Os dados não estão neste repositório. Na primeira execução, o script cria a pasta `dados/` e baixa automaticamente do portal da ANTT os arquivos anuais de 2010 a 2024, que bastam para todos os resultados.
 
 Como a ANTT pode alterar os endereços ou o conteúdo dos arquivos, a reprodução exata dos números depende de os dados publicados permanecerem os mesmos.
 
@@ -37,8 +35,6 @@ pip install -r requirements.txt
 python tcc_previsao_trafego.py
 ```
 
-Para incluir o exercício de PIB × elasticidade, coloque o arquivo de 2025 em `dados/` após a primeira execução e rode o script novamente.
-
 A execução completa leva cerca de 10 minutos.
 
 ## O que o programa faz
@@ -46,20 +42,24 @@ A execução completa leva cerca de 10 minutos.
 1. Lê os arquivos da ANTT e monta a série mensal da praça (179 meses, sem lacunas).
 2. Decompõe a série pela STL e calcula as forças de tendência e de sazonalidade.
 3. Aplica os testes de estacionariedade ADF, KPSS, OCSB e Canova-Hansen.
-4. Ajusta os cinco modelos e os valida por origem móvel, com 24 meses de teste.
-5. Calcula as métricas de erro e o teste de Diebold-Mariano, com correção de Holm para comparações múltiplas.
-6. Aplica aos erros do melhor modelo o teste de Ljung-Box e o teste t de média nula.
-7. Repete a validação no horizonte de doze meses e com o SARIMA sem diferença sazonal.
-8. Testa a sensibilidade à quebra da pandemia, com março a dezembro de 2020 ajustados.
-9. Projeta os doze meses seguintes, com intervalo de 95% para o Holt-Winters.
-10. Calcula o efeito de um viés de 1 ponto percentual na tarifa e compara o método de PIB × elasticidade com o realizado em 2025.
+4. Escolhe a configuração do Prophet usando apenas o treino (validação interna nos últimos 24 meses do treino).
+5. Ajusta os cinco modelos e os valida por origem móvel, com 24 meses de teste.
+6. Calcula as métricas de erro e o teste de Diebold-Mariano, com correção de Holm para comparações múltiplas.
+7. Aplica aos erros do melhor modelo o teste de Ljung-Box e o teste t de média nula.
+8. Repete a validação no horizonte de doze meses e com o SARIMA sem diferença sazonal.
+9. Testa a sensibilidade à quebra da pandemia, com março a dezembro de 2020 ajustados.
+10. Projeta os doze meses seguintes, com intervalo de 95% para o Holt-Winters.
+11. Calcula o efeito ilustrativo de um viés de 1 ponto percentual na taxa de crescimento sobre a tarifa.
+12. Aplica o método dos estudos de concessão (crescimento esperado do PIB, pelo Focus de cada data, multiplicado por elasticidade unitária) a partir de nov/2022 e de nov/2023 e o compara com as previsões de doze meses dos modelos nas mesmas origens.
 
 ## Arquivos gerados
 
 | Arquivo | Conteúdo |
 | --- | --- |
 | `resultados_para_texto.txt` | Relatório da rodada principal |
-| `analises_complementares.txt` | Correção de Holm, testes sazonais, SARIMA com D = 0, viés de 1 p.p. e PIB × elasticidade |
+| `selecao_prophet.txt` | Escolha da configuração do Prophet na validação interna do treino |
+| `exercicio_metodo_estudos.txt` | Comparação do método dos estudos com os modelos (Tabela 6 do TCC) |
+| `analises_complementares.txt` | Correção de Holm, testes sazonais, SARIMA com D = 0 e viés de 1 p.p. |
 | `numeros_do_texto.txt` | Números citados no texto do TCC que não constam das tabelas |
 | `serie_prevista.xlsx` | Série histórica, previsões do teste, previsão futura e métricas |
 | `metricas_h1.csv`, `metricas_h12.csv` | Métricas por modelo nos horizontes de um e de doze meses |

@@ -21,8 +21,10 @@
    7. Previsão de 12 meses a partir de nov/2024 e planilha serie_prevista.xlsx.
    8. Análises complementares: correção de Holm; testes de raiz unitária
       sazonal OCSB e Canova-Hansen; SARIMA com D = 0; viés de 1 p.p. na taxa
-      de crescimento do tráfego; projeção por PIB x elasticidade com o Focus de
-      22/11/2024, confrontada com o realizado de 2025.
+      de crescimento do tráfego (o exercício de PIB x elasticidade com dados de
+      2025 permanece no código, desativado).
+   0. Antes de tudo, a configuração do Prophet é escolhida só com o treino
+      (validação interna nos últimos 24 meses do treino; selecao_prophet.txt).
    9. Figuras do TCC (Figura 1: STL; Figura 2: janela de teste; Figura 3: erro
       relativo ao naïve por passo; Figura 4: previsão com intervalo de 95%).
   10. Conferência dos números citados no texto (numeros_do_texto.txt).
@@ -113,10 +115,10 @@ COVID_FIM    = "2020-12-01"
 RODAR_H12                 = True    # backtest de horizonte longo (h = 12)
 RODAR_SENSIBILIDADE_COVID = True    # repete tudo na série ajustada
 RODAR_SEGMENTOS           = False   # leves e pesados (não reportado no TCC)
-RODAR_COMPARACAO_FERIADOS = True    # três modos de feriado no Prophet
+RODAR_COMPARACAO_FERIADOS = False   # comparação na janela de teste desativada; a escolha é feita no treino
 
 # Tratamento de feriados no Prophet: "mensal" | "nativo" | "nenhum"
-PROPHET_FERIADOS = "mensal"
+PROPHET_FERIADOS = "nenhum"   # redefinido por selecionar_config_prophet() a partir do treino
 
 # Nomes de exibição (usados em tabelas e figuras — sem underscore).
 NAIVE   = "Naïve sazonal"
@@ -1254,6 +1256,7 @@ def main():
 # ==============================================================================
 # 10) ANÁLISES COMPLEMENTARES DO TCC
 # ==============================================================================
+RODAR_PIB_ELASTICIDADE = False   # exercício retirado do TCC (integridade dos dados de 2025)
 ARQ_2025   = os.path.join(PASTA_DADOS, "volume-trafego-praca-pedagio-2025_mensal_consolidado.csv")
 PIB_FOCUS  = {2024: 0.0317, 2025: 0.0195}     # Focus de 22/11/2024 (medianas)
 ELASTICIDADES = {"CNT (2026)": 1.61, "unitária": 1.00, "nula (= naïve sazonal)": 0.0}
@@ -1331,7 +1334,7 @@ def analises_complementares(serie):
           f"VP da receita {pv / base - 1:+.1%}; tarifa p/ VPL nulo {base / pv - 1:+.1%}")
 
     # (e) PIB x elasticidade (Focus de 22/11/2024) contra o realizado de 2025
-    if os.path.exists(ARQ_2025):
+    if RODAR_PIB_ELASTICIDADE and os.path.exists(ARQ_2025):
         d = pd.read_csv(ARQ_2025, sep=";", encoding="latin-1", dtype=str)
         d = d[d["praca"].str.contains(PRACA_ALVO, case=False, na=False)]
         d["v"] = pd.to_numeric(d["volume_total"].str.replace(".", "", regex=False)
@@ -1354,7 +1357,7 @@ def analises_complementares(serie):
         cr = R.sum() / sum(serie[x - pd.DateOffset(years=1)] for x in idx) - 1
         p(f"    crescimento realizado {cr:.2%}; elasticidade implícita {cr / PIB_FOCUS[2025]:.2f}")
     else:
-        p(f"\n[e] arquivo {ARQ_2025} não encontrado — exercício de PIB x elasticidade não executado.")
+        p("\n[e] exercício de PIB x elasticidade não executado (RODAR_PIB_ELASTICIDADE = False).")
 
     with open("analises_complementares.txt", "w", encoding="utf-8") as fh:
         fh.write("\n".join(out))
@@ -1504,9 +1507,91 @@ def numeros_do_texto(serie):
         fh.write("\n".join(out))
 
 
+# ==============================================================================
+# 13) ESCOLHA DA CONFIGURAÇÃO DO PROPHET SÓ COM O TREINO (validação interna)
+# ==============================================================================
+N_VALID_INTERNA = 24   # últimos 24 meses do treino (dez/2020 a nov/2022)
+
+def selecionar_config_prophet(serie):
+    """Compara as três formas de tratar o calendário no Prophet usando apenas
+    o treino: origem móvel de um passo sobre os últimos N_VALID_INTERNA meses
+    do treino, com o MASE escalonado pelo naïve sazonal do treino interno.
+    A janela de teste não é usada nesta escolha."""
+    tr = serie.iloc[:-N_TESTE]
+    ini = len(tr) - N_VALID_INTERNA
+    esc = escala_mase(tr.iloc[:ini])
+    res = {}
+    for modo in ("nenhum", "nativo", "mensal"):
+        prev = [m_prophet(tr.iloc[:t], 1, modo=modo)[0] for t in range(ini, len(tr))]
+        res[modo] = metricas(tr.iloc[ini:].values, np.array(prev), esc)
+    escolhido = min(res, key=lambda k: res[k]["MASE"])
+    linhas = [f"Validação interna do Prophet ({tr.index[ini]:%m/%Y} a {tr.index[-1]:%m/%Y}, só treino)"]
+    for k, v in res.items():
+        linhas.append(f"    {k:7s} MAE {v['MAE']:,.0f}  RMSE {v['RMSE']:,.0f}  MAPE {v['MAPE']:.2f}%  MASE {v['MASE']:.3f}")
+    linhas.append(f"    configuração escolhida: {escolhido}")
+    print("\n".join(linhas))
+    with open("selecao_prophet.txt", "w", encoding="utf-8") as fh:
+        fh.write("\n".join(linhas))
+    return escolhido
+
+
+# ==============================================================================
+# 14) MÉTODO DOS ESTUDOS (PIB x ELASTICIDADE) NA MESMA RÉGUA DOS MODELOS
+# ==============================================================================
+# Cada origem reproduz um estudo de estruturação: usa só o tráfego observado
+# até a origem e o Boletim Focus daquela data, como se faz no valuation.
+# Expectativas de crescimento do PIB (mediana Focus):
+#   25/11/2022: 2,81% (2022) e 0,70% (2023) - valores informados na matéria da
+#               B3 (Bora Investir, 05/12/2022) sobre o Focus da semana anterior;
+#   24/11/2023: 2,84% (2023) e 1,50% (2024) - Focus R20231124.pdf (BCB).
+FOCUS_ORIGENS = {"2022-11-01": {2022: 0.0281, 2023: 0.0070},
+                 "2023-11-01": {2023: 0.0284, 2024: 0.0150}}
+ELASTICIDADE_ESTUDOS = 1.0   # adotada nos estudos de tráfego da BR-381/262/MG/ES (Moraes, 2022)
+
+
+def exercicio_metodo_estudos(serie):
+    """Projeta, a partir de cada origem, os 12 meses seguintes pelo método dos
+    estudos (mesmo mês do ano anterior x (1 + PIB esperado x elasticidade)) e
+    compara com as previsões de 12 passos dos modelos feitas nas mesmas origens."""
+    tr = serie.iloc[:-N_TESTE]
+    esc = escala_mase(tr)
+    ordem, _ = ordem_sarima(tr)
+    modelos = construir_modelos(ordem)
+    linhas = []
+    for orig, pib in FOCUS_ORIGENS.items():
+        t = serie.index.get_loc(pd.Timestamp(orig)) + 1
+        trn, alvo = serie.iloc[:t], serie.iloc[t:t + 12]
+        for nome, f in modelos.items():
+            prev = np.asarray(f(trn, 12))
+            linhas += [(orig, nome, d, r, prev[i]) for i, (d, r) in enumerate(alvo.items())]
+        for d, r in alvo.items():
+            base = serie[d - pd.DateOffset(years=1)]
+            linhas.append((orig, "Método dos estudos (PIB x elasticidade)", d, r,
+                           base * (1 + ELASTICIDADE_ESTUDOS * pib[d.year])))
+    df = pd.DataFrame(linhas, columns=["origem", "modelo", "data", "real", "previsto"])
+    nv = df[df.modelo == NAIVE]; mae_nv = (nv.real - nv.previsto).abs().mean()
+    res = []
+    for nome, g in df.groupby("modelo"):
+        e = g.real - g.previsto
+        res.append({"Método": nome, "MAE": e.abs().mean(), "RMSE": np.sqrt((e ** 2).mean()),
+                    "MAPE (%)": 100 * (e.abs() / g.real).mean(), "MASE": e.abs().mean() / esc,
+                    "MAE relativo ao naïve": e.abs().mean() / mae_nv,
+                    "Desvio médio (%)": 100 * ((g.previsto - g.real) / g.real).mean()})
+    tab = pd.DataFrame(res).sort_values("MAE").set_index("Método")
+    txt = ("Método dos estudos x modelos — origens nov/2022 e nov/2023, 12 meses à frente "
+           "(24 previsões por método)\n" + tab.round(3).to_string())
+    print(txt)
+    with open("exercicio_metodo_estudos.txt", "w", encoding="utf-8") as fh:
+        fh.write(txt)
+    df.to_csv("exercicio_metodo_estudos.csv", index=False)
+    return tab
+
+
 if __name__ == "__main__":
+    PROPHET_FERIADOS = selecionar_config_prophet(_serie_principal())
     main()                       # rodada principal (itens 1 a 7)
     serie = _serie_principal()
     analises_complementares(serie)
     figuras_tcc(serie)
     numeros_do_texto(serie)
+    exercicio_metodo_estudos(serie)
